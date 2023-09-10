@@ -1,3 +1,4 @@
 venv/
 templates/
 db.sqlite3
+__pycache__/

@@ -4,6 +4,8 @@ from djapy.auth.dec import djapy_login_required
 
 from djapy.data.dec import field_required, input_required
 from djapy.pagination.dec import djapy_paginator
+from djapy.utils.ownership import is_owned_by
+from djapy.utils.response_format import create_response
 from djapy.wrappers.dec import method_to_view, node_to_json_response, model_to_json_node
 
 from .models import Todo
@@ -30,19 +32,41 @@ def todo_post(request, data, *args, **kwargs):
 })
 def todo_get(request, *args, **kwargs):
     todos = Todo.objects.all()
-    todos = todos.filter(user=request.user)
+    todos = todos.filter(user=request.user).order_by('-completed_at')
     return todos
 
 
+@model_to_json_node(['id', 'title', 'will_be_completed_at', 'created_at'])
 @field_required
-@model_to_json_node
 def todo_patch(request, data: TodoPathData, *args, **kwargs):
-    todo = Todo.objects.get(id=data.id)
-    todo.title = data.title if data.title else todo.title
-    todo.will_be_completed_at = data.will_be_completed_at if data.will_be_completed_at else None
-    todo.completed_at = timezone.now() if data.is_completed else todo.completed_at
-    todo.save()
-    return todo
+    try:
+        todo = Todo.objects.get(id=data.id)
+        if not is_owned_by(todo, request.user):
+            return create_response(
+                'failed',
+                'unauthorized',
+                'You are not authorized to update this todo.',
+                extras={
+                    'field_name': 'id',
+                    'field_value': data.id
+                }
+            )
+        todo.title = data.title if data.title else todo.title
+        todo.will_be_completed_at = data.will_be_completed_at if data.will_be_completed_at else todo.will_be_completed_at
+        todo.completed_at = data.completed_at
+        todo.save()
+        return todo
+    except Todo.DoesNotExist:
+        print(f'The todo with the id of {data.id} was not found.')
+        return create_response(
+            'failed',
+            'todo_not_found',
+            f'The todo with the id of {data.id} was not found.',
+            extras={
+                'field_name': 'id',
+                'field_value': data.id
+            }
+        )
 
 
 @csrf_exempt
@@ -55,3 +79,32 @@ def todo_view(request):
         'get': todo_get,
         'patch': todo_patch
     }
+
+
+@node_to_json_response
+@model_to_json_node(['id', 'title', 'will_be_completed_at', 'completed_at', 'created_at', 'updated_at'])
+def todo_detail(request, todoID: int, *args, **kwargs):
+    try:
+        todo = Todo.objects.get(id=todoID)
+        if not is_owned_by(todo, request.user):
+            return create_response(
+                'failed',
+                'unauthorized',
+                'You are not authorized to view this todo.',
+                extras={
+                    'field_name': 'id',
+                    'field_value': id
+                }
+            )
+        return todo
+    except Todo.DoesNotExist:
+        print(f'The todo with the id of {id} was not found.')
+        return create_response(
+            'failed',
+            'todo_not_found',
+            f'The todo with the id of {id} was not found.',
+            extras={
+                'field_name': 'id',
+                'field_value': id
+            }
+        )
